@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TTS Competition Manager v1.1.2</title>
+<title>TTS Competition Manager v1.1.4</title>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -374,7 +374,7 @@ body.dark .edit-score-btn:hover{background:#252729}
 <footer class="app-footer">
   <div class="footer-left">
     <span>Built by <a href="https://tabletennissociety.com.au" target="_blank">Table Tennis Society</a></span>
-    <span class="footer-version">v1.1.2</span>
+    <span class="footer-version">v1.1.4</span>
   </div>
   <div class="footer-right">
     <button class="footer-icon-btn" onclick="showInstructions()" title="How to use">
@@ -417,7 +417,7 @@ let S = {
 
 // Gist config lives in localStorage on each device
 const DEFAULT_GIST_ID = '95f8d546b4350268c0592e23b3a737b8';
-const DEFAULT_GIST_TOKEN = ['github_pa','t_11CBXMWLA','0hHzW23uXX6Z0_','bzwIt9fycxdbulqaLKg','FBcgndNnGxcgUkWlgI9nXkGEGBCQ5ME2a13ryJdK'].join('');
+const DEFAULT_GIST_TOKEN = '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';
 
 function getGistConfig() {
   try {
@@ -2679,6 +2679,7 @@ function deleteArchivedSeason(sid) {
 // DATA TOOLS - Data &amp; sync
 // ═══════════════════════════════════════════════════════
 function pageDataTools() {
+  setTimeout(() => checkGistConnectivity(), 50);
   const totalPlayers = S.players.length;
   const totalSeasons = S.seasons.length;
   const totalRounds = S.rounds.length;
@@ -2702,9 +2703,10 @@ function pageDataTools() {
     '<div class="card" style="margin-bottom:14px">' +
       '<div class="card-title">GitHub sync</div>' +
       (cfg
-        ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">' +
-            '<span style="width:10px;height:10px;border-radius:50%;background:var(--success);flex-shrink:0"></span>' +
-            '<span style="font-size:13px">Connected &mdash; Gist ID: <code style="font-size:11px;background:var(--bg);padding:1px 6px;border-radius:4px;border:1px solid var(--border)">' + cfg.gistId + '</code></span>' +
+        ? '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px" id="gist-status-row">' +
+            '<span id="gist-status-dot" style="width:10px;height:10px;border-radius:50%;background:#aaa;flex-shrink:0"></span>' +
+            '<span id="gist-status-text" style="font-size:13px">Checking connection&hellip;</span>' +
+            '<span style="font-size:13px;color:var(--muted)">&mdash; Gist ID: <code style="font-size:11px;background:var(--bg);padding:1px 6px;border-radius:4px;border:1px solid var(--border)">' + cfg.gistId + '</code></span>' +
             '<button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="disconnectGist()">Disconnect</button>' +
           '</div>' +
           '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">' +
@@ -2786,12 +2788,35 @@ function disconnectGist() {
   pageDataTools();
 }
 
+async function checkGistConnectivity() {
+  const dot = document.getElementById('gist-status-dot');
+  const txt = document.getElementById('gist-status-text');
+  if (!dot || !txt) return;
+  const cfg = getGistConfig();
+  if (!cfg) return;
+  try {
+    const res = await fetch('https://api.github.com/gists/' + cfg.gistId, {
+      headers: { 'Authorization': 'Bearer ' + cfg.token }
+    });
+    if (res.ok) {
+      dot.style.background = 'var(--success)';
+      txt.textContent = 'Connected';
+    } else {
+      dot.style.background = 'var(--red)';
+      txt.textContent = 'Connection failed (token may be revoked)';
+    }
+  } catch(e) {
+    dot.style.background = '#f5a623';
+    txt.textContent = 'Could not reach GitHub';
+  }
+}
+
 async function syncToGist() {
   const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
   const ok = await pushToGist(false);
   if (btn) { btn.disabled = false; btn.innerHTML = '<svg style="width:14px;height:14px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1v10M4 7l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke-linecap="round"/></svg> Save to GitHub'; }
   ok ? toast('Saved to GitHub ✓') : toast('Save failed - check your connection');
-  pageDataTools();
+  pageDataTools(); checkGistConnectivity();
 }
 
 async function syncFromGist() {
