@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TTS Competition Manager v1.0.2</title>
+<title>TTS Competition Manager v1.0.3</title>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -374,7 +374,7 @@ body.dark .edit-score-btn:hover{background:#252729}
 <footer class="app-footer">
   <div class="footer-left">
     <span>Built by <a href="https://tabletennissociety.com.au" target="_blank">Table Tennis Society</a></span>
-    <span class="footer-version">v1.0.2</span>
+    <span class="footer-version">v1.0.3</span>
   </div>
   <div class="footer-right">
     <button class="footer-icon-btn" onclick="showInstructions()" title="How to use">
@@ -542,12 +542,18 @@ function seasonPlayers(sid) {
 function roundMatches(rid) { return S.matches.filter(m => m.roundId === rid); }
 
 // HANDICAP
-function calcHC(p1, p2) {
+const HC_CAPS = { 31: 28, 21: 18, 11: 9 };
+
+function calcHC(p1, p2, pointsPerSet) {
+  const pts = pointsPerSet || 31;
+  const cap = HC_CAPS[pts] !== undefined ? HC_CAPS[pts] : 28;
   if (p1.rating === p2.rating) return { higher: p1, lower: p2, diff: 0, p1Start: 0, p2Start: 0 };
   const higher = p1.rating > p2.rating ? p1 : p2;
   const lower = p1.rating > p2.rating ? p2 : p1;
-  const diff = higher.rating - lower.rating;
-  return { higher, lower, diff, p1Start: p1.id === higher.id ? 0 : diff, p2Start: p2.id === higher.id ? 0 : diff };
+  const rawDiff = higher.rating - lower.rating;
+  const scaledDiff = Math.round(rawDiff * pts / 31);
+  const diff = Math.min(scaledDiff, cap);
+  return { higher, lower, diff, rawDiff, p1Start: p1.id === higher.id ? 0 : diff, p2Start: p2.id === higher.id ? 0 : diff };
 }
 
 function matchWinner(games, p1Id, p2Id, bestOf) {
@@ -842,11 +848,12 @@ function pageRounds() {
       const totalM = S.matches.filter(m => m.roundId === r.id).length;
       const doneM = S.matches.filter(m => m.roundId === r.id && m.winnerId).length;
       const fmt = r.bestOf === 1 ? 'Single set' : `Best of ${r.bestOf}`;
+      const ptsLabel = r.pointsPerSet && r.pointsPerSet !== 31 ? ` · ${r.pointsPerSet} pts` : '';
       return `<tr>
         <td style="color:var(--muted);font-size:11px">${i + 1}</td>
         <td><span style="font-weight:500;cursor:pointer;color:var(--navy);text-decoration:underline" onclick="openRoundDetail('${r.id}')">${r.name}</span></td>
         <td style="color:var(--muted);font-size:12px">${fmtDate(r.date)}</td>
-        <td><span class="badge b-navy">${fmt}</span></td>
+        <td><span class="badge b-navy">${fmt}${ptsLabel}</span></td>
         <td class="c">${(r.groups || []).length}</td>
         <td style="min-width:100px">
           ${totalM === 0
@@ -883,7 +890,14 @@ function openAddRound() {
         <option value="5">Best of 5</option>
       </select></div>
     </div>
-    <div class="form-row"><div><label>Number of groups</label><input type="number" id="rnd-groups" min="1" max="10" value="2"/></div></div>
+    <div class="form-row c2">
+      <div><label>Points per set</label><select id="rnd-pts">
+        <option value="31" selected>31 points</option>
+        <option value="21">21 points</option>
+        <option value="11">11 points</option>
+      </select></div>
+      <div><label>Number of groups</label><input type="number" id="rnd-groups" min="1" max="10" value="2"/></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
       <button class="btn btn-primary" onclick="saveRound()">Create round</button>
@@ -893,6 +907,7 @@ function openAddRound() {
 function saveRound() {
   const name = $('rnd-name').value.trim(); if (!name) { alert('Enter a name'); return; }
   const bestOf = parseInt($('rnd-bo').value);
+  const pointsPerSet = parseInt($('rnd-pts').value) || 31;
   const numGroups = Math.max(1, parseInt($('rnd-groups').value) || 1);
   const ts = Date.now();
   const groups = Array.from({ length: numGroups }, (_, i) => ({
@@ -900,7 +915,7 @@ function saveRound() {
     name: 'Group ' + String.fromCharCode(65 + i),
     playerIds: []
   }));
-  const r = { id: Date.now().toString(), seasonId: S.activeSeason, name, date: $('rnd-date').value, bestOf, numGroups, groups, completed: false };
+  const r = { id: Date.now().toString(), seasonId: S.activeSeason, name, date: $('rnd-date').value, bestOf, pointsPerSet, numGroups, groups, completed: false };
   S.rounds.push(r);
   toast('Round created');
   closeModal(); save(); buildSeasonDropdown();
@@ -937,8 +952,8 @@ function applyRoundRatings(rid) {
     const p1Change = p1Won ? 1 : -1;
     const p2Change = p1Won ? -1 : 1;
     // Apply with floor 0 and ceiling 31
-    p1.rating = Math.max(0, Math.min(31, p1.rating + p1Change));
-    p2.rating = Math.max(0, Math.min(31, p2.rating + p2Change));
+    p1.rating = Math.max(-20, Math.min(100, p1.rating + p1Change));
+    p2.rating = Math.max(-20, Math.min(100, p2.rating + p2Change));
     // Log for p1
     p1.ratingHistory.push({
       date: r.date || new Date().toISOString().slice(0,10),
@@ -976,7 +991,7 @@ function reverseRoundRatings(rid) {
       if (!p.ratingHistory) return;
       const roundEntries = p.ratingHistory.filter(h => h.roundId === rid && !h.isManual);
       roundEntries.forEach(h => {
-        p.rating = Math.max(0, Math.min(31, p.rating - h.change));
+        p.rating = Math.max(-20, Math.min(100, p.rating - h.change));
       });
     });
   }
@@ -1049,7 +1064,7 @@ function renderAttendingScreen(rid) {
         '<div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">New player on the night?</div>' +
         '<div style="display:flex;gap:8px">' +
           '<input id="att-np-name" placeholder="Player name" style="flex:1"/>' +
-          '<input id="att-np-rating" type="number" min="0" max="31" value="10" placeholder="Rating" style="width:80px"/>' +
+          '<input id="att-np-rating" type="number" min="-20" max="100" value="10" placeholder="Rating" style="width:80px"/>' +
           '<button class="btn btn-sm btn-primary" onclick="addAttendingNewPlayer(&#39;' + rid + '&#39;,&#39;' + s.id + '&#39;)">Add</button>' +
         '</div>' +
       '</div>' +
@@ -1078,7 +1093,7 @@ function addAttendingNewPlayer(rid, sid) {
   const name = $('att-np-name')?.value.trim();
   const rating = parseInt($('att-np-rating')?.value);
   if (!name) { alert('Enter a name'); return; }
-  if (isNaN(rating) || rating < 0 || rating > 31) { alert('Rating must be 0-31'); return; }
+  if (isNaN(rating) || rating < -20 || rating > 100) { alert('Rating must be -20 to 100'); return; }
   if (playerNameExists(name)) { alert('"' + name + '" is already in the player database. Each player must have a unique name.'); return; }
   // Preserve current checkbox states before re-render
   const r = S.rounds.find(r => r.id === rid);
@@ -1117,6 +1132,7 @@ function renderRoundDetail(rid, tab) {
   const s = activeSeason();
   if (!r) return pageRounds();
   const fmt = r.bestOf === 1 ? 'Single set' : `Best of ${r.bestOf}`;
+  const ptsLabel = r.pointsPerSet && r.pointsPerSet !== 31 ? ` · ${r.pointsPerSet} pts` : '';
   const h2h = headToHeadMatches(rid);
 
   $('main-content').innerHTML = `
@@ -1124,7 +1140,7 @@ function renderRoundDetail(rid, tab) {
     <button class="back-btn" onclick="pageRounds()">&#8592; Rounds</button>
     <div style="flex:1">
       <div class="page-title">${r.name}</div>
-      <div class="page-sub">${fmtDate(r.date)} &bull; ${fmt} &bull; ${(r.groups||[]).length} group${(r.groups||[]).length!==1?'s':''} &bull; ${(r.attendingIds||[]).length > 0 ? (r.attendingIds.length + ' attending') : 'attendance not set'}</div>
+      <div class="page-sub">${fmtDate(r.date)} &bull; ${fmt}${ptsLabel} &bull; ${(r.groups||[]).length} group${(r.groups||[]).length!==1?'s':''} &bull; ${(r.attendingIds||[]).length > 0 ? (r.attendingIds.length + ' attending') : 'attendance not set'}</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <span class="badge ${r.completed?'b-green':'b-gray'}">${r.completed?'Complete':'In progress'}</span>
@@ -1186,7 +1202,7 @@ function renderGroupsTab(r) {
             const p2 = S.players.find(p => p.id === p2id);
             const match = S.matches.find(m => m.roundId === r.id && m.groupId === g.id && !m.isHeadToHead &&
               ((m.p1Id === p1id && m.p2Id === p2id) || (m.p1Id === p2id && m.p2Id === p1id)));
-            const hc = p1 && p2 ? calcHC(p1, p2) : null;
+            const hc = p1 && p2 ? calcHC(p1, p2, r.pointsPerSet) : null;
             // HC start display: show start scores clearly between names when there is a handicap
             const hcStart = hc && hc.diff > 0
               ? `<div style="font-size:12px;color:var(--muted);text-align:center;margin-top:2px">
@@ -1273,7 +1289,7 @@ function openAssignPlayers(rid, gid) {
       <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">New player on the night?</div>
       <div style="display:flex;gap:8px">
         <input id="np-name" placeholder="Player name" style="flex:1"/>
-        <input id="np-rating" type="number" min="0" max="31" value="10" placeholder="Rating" style="width:80px"/>
+        <input id="np-rating" type="number" min="-20" max="100" value="10" placeholder="Rating" style="width:80px"/>
         <button class="btn btn-sm btn-primary" onclick="addNewPlayerToGroup('${rid}','${gid}','${s.id}')">Add</button>
       </div>
     </div>
@@ -1287,7 +1303,7 @@ function addNewPlayerToGroup(rid, gid, sid) {
   const name = $('np-name').value.trim();
   const rating = parseInt($('np-rating').value);
   if (!name) { alert('Enter a name'); return; }
-  if (isNaN(rating) || rating < 0 || rating > 31) { alert('Rating must be 0-31'); return; }
+  if (isNaN(rating) || rating < -20 || rating > 100) { alert('Rating must be -20 to 100'); return; }
   const p = { id: Date.now().toString(), name, rating, ratingHistory: [] };
   S.players.push(p);
   const s = S.seasons.find(s => s.id === sid);
@@ -1319,7 +1335,8 @@ function openScoreEntry(rid, gid, p1id, p2id, isH2H, existingMatchId) {
   const r = S.rounds.find(r => r.id === rid);
   const p1 = S.players.find(p => p.id === p1id);
   const p2 = S.players.find(p => p.id === p2id);
-  const hc = calcHC(p1, p2);
+  const pts = r.pointsPerSet || 31;
+  const hc = calcHC(p1, p2, pts);
   const existing = existingMatchId ? S.matches.find(m => m.id === existingMatchId) : null;
   const bestOf = r.bestOf;
   const numGames = bestOf;
@@ -1352,7 +1369,7 @@ function openScoreEntry(rid, gid, p1id, p2id, isH2H, existingMatchId) {
           <div style="font-size:10px;color:var(--muted);margin-top:3px">${hc.diff>0?(hc.higher.id===p2id?'higher rated':'lower rated — starts ahead'):'same rating'}</div>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:4px">${hc.diff===0?'No handicap — both start at 0':'First to 31 wins each '+(bestOf===1?'set':'game')}</div>
+      <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:4px">${hc.diff===0?'No handicap — both start at 0':'First to ' + pts + ' wins each '+(bestOf===1?'set':'game')}</div>
     </div>
     <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:7px">Enter scores</div>
     <div class="score-grid">${gameRows}</div>
@@ -1387,7 +1404,8 @@ function saveMatchScore(rid, gid, p1id, p2id, isH2H, existingId, numGames, bestO
   const r = S.rounds.find(r => r.id === rid);
   const p1 = S.players.find(p => p.id === p1id);
   const p2 = S.players.find(p => p.id === p2id);
-  const hc = p1 && p2 ? calcHC(p1, p2) : { p1Start: 0, p2Start: 0 };
+  const pts = r.pointsPerSet || 31;
+  const hc = p1 && p2 ? calcHC(p1, p2, pts) : { p1Start: 0, p2Start: 0 };
   const games = [];
   const scoreErrors = [];
   for (let i = 0; i < numGames; i++) {
@@ -1396,15 +1414,15 @@ function saveMatchScore(rid, gid, p1id, p2id, isH2H, existingId, numGames, bestO
       const s1 = parseInt(v1), s2 = parseInt(v2);
       // Effective score = entered score + handicap start
       const eff1 = s1 + hc.p1Start, eff2 = s2 + hc.p2Start;
-      if (eff1 < 31 && eff2 < 31) {
-        scoreErrors.push('Game ' + (i+1) + ': neither player reached 31 (' + p1.name + ' ' + eff1 + ', ' + p2.name + ' ' + eff2 + ')');
+      if (eff1 < pts && eff2 < pts) {
+        scoreErrors.push('Game ' + (i+1) + ': neither player reached ' + pts + ' (' + p1.name + ' ' + eff1 + ', ' + p2.name + ' ' + eff2 + ')');
       }
       games.push({ p1: s1, p2: s2 });
     }
   }
   if (games.length === 0) { alert('Enter at least one score'); return; }
   if (scoreErrors.length > 0) {
-    const warnMsg = 'Score warning - neither player reached 31 in some games. Save anyway?\n\n' + scoreErrors.join('\n');
+    const warnMsg = 'Score warning - neither player reached ' + pts + ' in some games. Save anyway?\n\n' + scoreErrors.join('\n');
     if (!confirm(warnMsg)) return;
   }
   const winnerId = matchWinner(games, p1id, p2id, bestOf);
@@ -1472,7 +1490,7 @@ function renderH2HTable(r) {
       const p1 = S.players.find(p => p.id === m.p1Id);
       const p2 = S.players.find(p => p.id === m.p2Id);
       const winner = S.players.find(p => p.id === m.winnerId);
-      const hc = p1 && p2 ? calcHC(p1, p2) : { p1Start: 0, p2Start: 0 };
+      const hc = p1 && p2 ? calcHC(p1, p2, r.pointsPerSet) : { p1Start: 0, p2Start: 0 };
       const w1 = m.games.filter(g => g.p1 > g.p2).length;
       const w2 = m.games.filter(g => g.p2 > g.p1).length;
       return `<tr>
@@ -1570,7 +1588,7 @@ function pagePlayers() {
           <td style="color:var(--muted);font-size:11px">${i + 1}</td>
           <td><span style="font-weight:500;cursor:pointer;color:var(--navy);text-decoration:underline" onclick="openPlayerDetail('${p.id}','${s.id}')">${p.name}</span></td>
           <td><span class="badge b-orange">${p.rating}</span></td>
-          <td><div class="rbar"><div class="rbar-fill" style="width:${Math.round((p.rating / 31) * 100)}%"></div></div></td>
+          <td><div class="rbar"><div class="rbar-fill" style="width:${Math.round((Math.max(0, p.rating) / 100) * 100)}%"></div></div></td>
           <td>${trend}</td>
           <td><div class="row-actions">
             <button class="btn btn-sm btn-secondary" onclick="openPlayerDetail('${p.id}','${s.id}')">View</button>
@@ -1603,8 +1621,8 @@ function openPlayerDetail(pid, sid) {
     sparkPoints.push(...pts);
   }
 
-  const min = sparkPoints.length > 0 ? Math.max(0, Math.min(...sparkPoints) - 1) : 0;
-  const max = sparkPoints.length > 0 ? Math.min(31, Math.max(...sparkPoints) + 1) : 10;
+  const min = sparkPoints.length > 0 ? Math.max(-20, Math.min(...sparkPoints) - 1) : -20;
+  const max = sparkPoints.length > 0 ? Math.min(100, Math.max(...sparkPoints) + 1) : 10;
   const range = max - min || 1;
   const W = 400, H = 80;
   const svgPoints = sparkPoints.map((v, i) => {
@@ -1675,8 +1693,8 @@ function openAddNewPlayer(sid) {
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Creates a new player in the database and adds them to this season.</div>
     <div class="form-row"><div><label>Full name</label><input id="pl-name" placeholder="Player name"/></div></div>
     <div class="form-row"><div>
-      <label>Rating (0 - 31)</label>
-      <input type="number" id="pl-rating" min="0" max="31" value="10"/>
+      <label>Rating (-20 to 100)</label>
+      <input type="number" id="pl-rating" min="-20" max="100" value="10"/>
       <div style="font-size:11px;color:var(--muted);margin-top:3px">0 = beginner &nbsp;|&nbsp; 31 = top player</div>
     </div></div>
     <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveNewPlayer('${sid}')">Add player</button></div>`);
@@ -1687,7 +1705,7 @@ function openEditPlayerRating(pid, sid) {
   const p = S.players.find(p => p.id === pid);
   if (!p) return;
   showModal('<div class="modal-title">Edit rating - ' + p.name + '</div>' +
-    '<div class="form-row"><div><label>New rating (0 - 31)</label><input type="number" id="epr-rating" min="0" max="31" value="' + p.rating + '"/></div></div>' +
+    '<div class="form-row"><div><label>New rating (-20 to 100)</label><input type="number" id="epr-rating" min="-20" max="100" value="' + p.rating + '"/></div></div>' +
     '<div class="form-row"><div><label>Reason (optional)</label><input id="epr-note" placeholder="e.g. Reassessed after trials"/></div></div>' +
     '<div style="font-size:12px;color:var(--muted);font-style:italic;margin-bottom:4px">Logged in the player\'s rating history.</div>' +
     '<div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button>' +
@@ -1697,7 +1715,7 @@ function openEditPlayerRating(pid, sid) {
 function saveEditPlayerRating(pid, sid) {
   const newRating = parseInt($('epr-rating').value);
   const note = $('epr-note')?.value.trim() || '';
-  if (isNaN(newRating) || newRating < 0 || newRating > 31) { alert('Rating must be 0-31'); return; }
+  if (isNaN(newRating) || newRating < -20 || newRating > 100) { alert('Rating must be -20 to 100'); return; }
   const p = S.players.find(p => p.id === pid);
   const change = newRating - p.rating;
   p.rating = newRating;
@@ -1753,7 +1771,7 @@ function saveNewPlayer(sid) {
   const name = $('pl-name').value.trim();
   const rating = parseInt($('pl-rating').value);
   if (!name) { alert('Enter a name'); return; }
-  if (isNaN(rating) || rating < 0 || rating > 31) { alert('Rating must be 0-31'); return; }
+  if (isNaN(rating) || rating < -20 || rating > 100) { alert('Rating must be -20 to 100'); return; }
   if (playerNameExists(name)) { alert('"' + name + '" is already in the player database. Each player must have a unique name.'); return; }
   const p = { id: Date.now().toString(), name, rating, ratingHistory: [] };
   S.players.push(p);
@@ -2321,8 +2339,8 @@ function showSeasonSummary(sid) {
 
   const roundIds = ['__start__', ...allRounds.map(r=>r.id)];
   const allRatingVals = chartData.flatMap(d => roundIds.map(rid => d.roundRatings[rid] ?? d.player.rating));
-  const minR = Math.max(0, Math.min(...allRatingVals)-1);
-  const maxR = Math.min(31, Math.max(...allRatingVals)+1);
+  const minR = Math.max(-20, Math.min(...allRatingVals)-1);
+  const maxR = Math.min(100, Math.max(...allRatingVals)+1);
   const rRange = maxR - minR || 1;
 
   const svgLines = chartData.map(d => {
@@ -2438,7 +2456,7 @@ function pageAllPlayers() {
               '<td style="color:var(--muted);font-size:11px">' + (i + 1) + '</td>' +
               '<td><span style="font-weight:500;cursor:pointer;color:var(--navy);text-decoration:underline" onclick="openGlobalPlayerDetail(\'' + p.id + '\')">' + p.name + '</span></td>' +
               '<td><span class="badge b-orange">' + p.rating + '</span></td>' +
-              '<td><div class="rbar"><div class="rbar-fill" style="width:' + Math.round((p.rating / 31) * 100) + '%"></div></div></td>' +
+              '<td><div class="rbar"><div class="rbar-fill" style="width:' + Math.round((Math.max(0, p.rating) / 100) * 100) + '%"></div></div></td>' +
               '<td style="font-size:12px;color:var(--muted)">' + (playerSeasons.length > 0 ? playerSeasons.map(s => s.name).join(', ') : 'None') + '</td>' +
               '<td>' + trend + '</td>' +
               '<td><div class="row-actions">' +
@@ -2455,7 +2473,7 @@ function openAddGlobalPlayer() {
   showModal('<div class="modal-title">New player</div>' +
     '<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Adds to the global database. You can then add them to any season.</div>' +
     '<div class="form-row"><div><label>Full name</label><input id="gpl-name" placeholder="Player name"/></div></div>' +
-    '<div class="form-row"><div><label>Rating (0 - 31)</label><input type="number" id="gpl-rating" min="0" max="31" value="10"/>' +
+    '<div class="form-row"><div><label>Rating (-20 to 100)</label><input type="number" id="gpl-rating" min="-20" max="100" value="10"/>' +
     '<div style="font-size:11px;color:var(--muted);margin-top:3px">0 = beginner | 31 = top player</div></div></div>' +
     '<div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button>' +
     '<button class="btn btn-primary" onclick="saveGlobalPlayer()">Add player</button></div>');
@@ -2466,7 +2484,7 @@ function saveGlobalPlayer() {
   const name = $('gpl-name').value.trim();
   const rating = parseInt($('gpl-rating').value);
   if (!name) { alert('Enter a name'); return; }
-  if (isNaN(rating) || rating < 0 || rating > 31) { alert('Rating must be 0-31'); return; }
+  if (isNaN(rating) || rating < -20 || rating > 100) { alert('Rating must be -20 to 100'); return; }
   if (playerNameExists(name)) { alert('"' + name + '" is already in the player database. Each player must have a unique name.'); return; }
   S.players.push({ id: Date.now().toString(), name, rating, ratingHistory: [] });
   toast('Player added'); closeModal(); save(); pageAllPlayers();
@@ -2475,7 +2493,7 @@ function saveGlobalPlayer() {
 function openGlobalEditRating(pid) {
   const p = S.players.find(p => p.id === pid);
   showModal('<div class="modal-title">Edit rating - ' + p.name + '</div>' +
-    '<div class="form-row"><div><label>New rating (0 - 31)</label><input type="number" id="gpl-rating" min="0" max="31" value="' + p.rating + '"/></div></div>' +
+    '<div class="form-row"><div><label>New rating (-20 to 100)</label><input type="number" id="gpl-rating" min="-20" max="100" value="' + p.rating + '"/></div></div>' +
     '<div class="form-row"><div><label>Reason (optional)</label><input id="gpl-note" placeholder="e.g. Reassessed after trials"/></div></div>' +
     '<div style="font-size:12px;color:var(--muted);font-style:italic;margin-bottom:4px">Logged in the player\'s rating history.</div>' +
     '<div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button>' +
@@ -2485,7 +2503,7 @@ function openGlobalEditRating(pid) {
 function saveGlobalRatingEdit(pid) {
   const newRating = parseInt($('gpl-rating').value);
   const note = $('gpl-note')?.value.trim() || '';
-  if (isNaN(newRating) || newRating < 0 || newRating > 31) { alert('Rating must be 0-31'); return; }
+  if (isNaN(newRating) || newRating < -20 || newRating > 100) { alert('Rating must be -20 to 100'); return; }
   const p = S.players.find(p => p.id === pid);
   const change = newRating - p.rating;
   p.rating = newRating;
@@ -2514,8 +2532,8 @@ function openGlobalPlayerDetail(pid) {
     for (let i = allHist.length - 1; i >= 0; i--) { cur = cur - allHist[i].change; pts.unshift(cur); }
     sparkPoints.push(...pts);
   }
-  const min = sparkPoints.length > 0 ? Math.max(0, Math.min(...sparkPoints) - 1) : 0;
-  const max = sparkPoints.length > 0 ? Math.min(31, Math.max(...sparkPoints) + 1) : 10;
+  const min = sparkPoints.length > 0 ? Math.max(-20, Math.min(...sparkPoints) - 1) : -20;
+  const max = sparkPoints.length > 0 ? Math.min(100, Math.max(...sparkPoints) + 1) : 10;
   const range = max - min || 1;
   const W = 400, H = 80;
   const svgPoints = sparkPoints.map((v, i) => {
@@ -2857,12 +2875,13 @@ function renderRoundEditorPage(rid) {
   const r = S.rounds.find(r => r.id === rid);
   const s = activeSeason();
   const fmt = r.bestOf === 1 ? 'Single set' : 'Best of ' + r.bestOf;
+  const ptsLabel = r.pointsPerSet && r.pointsPerSet !== 31 ? ' · ' + r.pointsPerSet + ' pts' : '';
 
   $('main-content').innerHTML =
     '<div class="round-detail-header">' +
       '<button class="back-btn" onclick="openRoundDetail(\'' + rid + '\')">&#8592; Back to round</button>' +
       '<div style="flex:1"><div class="page-title">Edit ' + r.name + '</div>' +
-      '<div class="page-sub">' + fmtDate(r.date) + ' &bull; ' + fmt + '</div></div>' +
+      '<div class="page-sub">' + fmtDate(r.date) + ' &bull; ' + fmt + ptsLabel + '</div></div>' +
     '</div>' +
 
     // ── Section 1: Basic details ──
@@ -2878,7 +2897,11 @@ function renderRoundEditorPage(rid) {
           '<option value="3"' + (r.bestOf === 3 ? ' selected' : '') + '>Best of 3</option>' +
           '<option value="5"' + (r.bestOf === 5 ? ' selected' : '') + '>Best of 5</option>' +
         '</select></div>' +
-        '<div></div>' +
+        '<div><label>Points per set</label><select id="re-pts">' +
+          '<option value="31"' + ((r.pointsPerSet || 31) === 31 ? ' selected' : '') + '>31 points</option>' +
+          '<option value="21"' + (r.pointsPerSet === 21 ? ' selected' : '') + '>21 points</option>' +
+          '<option value="11"' + (r.pointsPerSet === 11 ? ' selected' : '') + '>11 points</option>' +
+        '</select></div>' +
       '</div>' +
       '<button class="btn btn-primary" onclick="saveRoundDetails(\'' + rid + '\')">Save details</button>' +
     '</div>' +
@@ -2972,6 +2995,7 @@ function saveRoundDetails(rid) {
   r.name = name;
   r.date = $('re-date').value;
   r.bestOf = parseInt($('re-bo').value);
+  r.pointsPerSet = parseInt($('re-pts').value) || 31;
   // Note: existing scores are kept as-is when format changes
   toast('Round details saved'); save(); renderRoundEditorPage(rid);
 }
@@ -3014,7 +3038,7 @@ function addNewPlayerInEditor(rid, gid, sid) {
   showModal('<div class="modal-title">New player</div>' +
     '<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Adds to database, season, and this group.</div>' +
     '<div class="form-row"><div><label>Full name</label><input id="enp-name" placeholder="Player name"/></div></div>' +
-    '<div class="form-row"><div><label>Rating (0 - 31)</label><input type="number" id="enp-rating" min="0" max="31" value="10"/></div></div>' +
+    '<div class="form-row"><div><label>Rating (-20 to 100)</label><input type="number" id="enp-rating" min="-20" max="100" value="10"/></div></div>' +
     '<div class="modal-actions">' +
       '<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>' +
       '<button class="btn btn-primary" onclick="saveNewPlayerInEditor(\'' + rid + '\',\'' + gid + '\',\'' + sid + '\')">Add player</button>' +
@@ -3026,7 +3050,7 @@ function saveNewPlayerInEditor(rid, gid, sid) {
   const name = $('enp-name').value.trim();
   const rating = parseInt($('enp-rating').value);
   if (!name) { alert('Enter a name'); return; }
-  if (isNaN(rating) || rating < 0 || rating > 31) { alert('Rating must be 0-31'); return; }
+  if (isNaN(rating) || rating < -20 || rating > 100) { alert('Rating must be -20 to 100'); return; }
   if (playerNameExists(name)) { alert('"' + name + '" is already in the player database. Each player must have a unique name.'); return; }
   const p = { id: Date.now().toString(), name, rating, ratingHistory: [] };
   S.players.push(p);
@@ -3131,7 +3155,7 @@ function showInstructions() {
       <li><div class="instr-icon">5</div><div><strong>Enter match scores</strong><br>Click "Enter score" on any match. Handicap starts are calculated automatically from player ratings. Group standings update live.</div></li>
       <li><div class="instr-icon">6</div><div><strong>Head to head</strong><br>After the round robin, use the Head to head tab to run extra matches between any players.</div></li>
       <li><div class="instr-icon">7</div><div><strong>Complete the round</strong><br>Mark the round complete to push all results into the season standings. Reopen a round at any time to make corrections.</div></li>
-      <li><div class="instr-icon" style="background:var(--orange)">HC</div><div><strong>Handicap system</strong><br>Ratings run 0-31. The difference in ratings is the head start for the lower-rated player each game. E.g. ratings 20 vs 10 means the lower-rated player starts each game at 10:0. Each game is first to 31.</div></li>
+      <li><div class="instr-icon" style="background:var(--orange)">HC</div><div><strong>Handicap system</strong><br>Ratings run -20 to 100. The difference in ratings is the head start for the lower-rated player each game (capped at 28/18/9 depending on points format). E.g. ratings 20 vs 10 means the lower-rated player starts each game at 10:0.</div></li>
     </ul>
     <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Got it</button></div>`);
 }
