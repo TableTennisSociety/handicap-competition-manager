@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TTS Competition Manager v1.0.3</title>
+<title>TTS Competition Manager v1.1</title>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -374,7 +374,7 @@ body.dark .edit-score-btn:hover{background:#252729}
 <footer class="app-footer">
   <div class="footer-left">
     <span>Built by <a href="https://tabletennissociety.com.au" target="_blank">Table Tennis Society</a></span>
-    <span class="footer-version">v1.0.3</span>
+    <span class="footer-version">v1.1</span>
   </div>
   <div class="footer-right">
     <button class="footer-icon-btn" onclick="showInstructions()" title="How to use">
@@ -416,11 +416,17 @@ let S = {
 // ═══════════════════════════════════════════════════════
 
 // Gist config lives in localStorage on each device
+const DEFAULT_GIST_ID = '95f8d546b4350268c0592e23b3a737b8';
+const DEFAULT_GIST_TOKEN = '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';
+
 function getGistConfig() {
   try {
     const c = localStorage.getItem('tts-gist-config');
-    return c ? JSON.parse(c) : null;
-  } catch(e) { return null; }
+    if (c) return JSON.parse(c);
+    return { gistId: DEFAULT_GIST_ID, token: DEFAULT_GIST_TOKEN };
+  } catch(e) {
+    return { gistId: DEFAULT_GIST_ID, token: DEFAULT_GIST_TOKEN };
+  }
 }
 function setGistConfig(gistId, token) {
   localStorage.setItem('tts-gist-config', JSON.stringify({ gistId, token }));
@@ -429,8 +435,7 @@ function clearGistConfig() {
   localStorage.removeItem('tts-gist-config');
 }
 function hasGistConfig() {
-  const c = getGistConfig();
-  return !!(c && c.gistId && c.token);
+  return true; // defaults are hardcoded
 }
 
 // Always save to localStorage immediately (fast, local backup)
